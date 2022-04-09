@@ -329,6 +329,8 @@ func (nm *networkManager) newNetworkImplHnsV2(nwInfo *NetworkInfo, extIf *extern
 			// we can't validate if the network already exists, don't continue
 			return nil, fmt.Errorf("Failed to create hcn network: %s, failed to query for existing network with error: %v", hcnNetwork.Name, err)
 		}
+	} else {
+		log.Printf("[net] Network with name %s already exists", hcnNetwork.Name)
 	}
 
 	var vlanid int
