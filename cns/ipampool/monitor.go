@@ -198,9 +198,9 @@ func (pm *Monitor) reconcile(ctx context.Context) error {
 	state := buildIPPoolState(allocatedIPs, pm.spec)
 	observeIPPoolState(state, meta)
 
-	// log every 30th reconcile to reduce the AI load. we will always log when the monitor
+	// log every 3600th reconcile to reduce the AI load. we will always log when the monitor
 	// changes the pool, below.
-	if statelogDownsample = (statelogDownsample + 1) % 30; statelogDownsample == 0 { //nolint:gomnd //downsample by 30
+	if statelogDownsample = (statelogDownsample + 1) % (60 * 60); statelogDownsample == 0 { //nolint:gomnd //downsample by 3600
 		logger.Printf("ipam-pool-monitor state: %+v, meta: %+v", state, meta)
 	}
 
@@ -237,8 +237,6 @@ func (pm *Monitor) reconcile(ctx context.Context) error {
 
 	// no pods scheduled
 	case state.allocatedToPods == 0:
-		logger.Printf("ipam-pool-monitor state %+v", state)
-		logger.Printf("[ipam-pool-monitor] No pods scheduled")
 		return nil
 	}
 
