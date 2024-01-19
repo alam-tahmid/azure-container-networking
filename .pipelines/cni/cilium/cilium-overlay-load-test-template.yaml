@@ -67,7 +67,7 @@ stages:
                 kubectl get po -owide -A
 
                 echo "deploy Cilium ConfigMap"
-                kubectl apply -f test/integration/manifests/cilium/cilium-config.yaml
+                kubectl apply -f test/integration/manifests/cilium/cilium-config-hubble.yaml
                 echo "install Cilium onto Overlay Cluster"
                 kubectl apply -f test/integration/manifests/cilium/cilium-agent
                 kubectl apply -f test/integration/manifests/cilium/cilium-operator
