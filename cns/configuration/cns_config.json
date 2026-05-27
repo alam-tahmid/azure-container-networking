@@ -7,7 +7,8 @@
         "SnapshotIntervalInMins": 60,
         "ConfigSnapshotIntervalInMins": 60,
         "TelemetryBatchIntervalInSecs": 15,
-        "TelemetryBatchSizeBytes": 16384
+        "TelemetryBatchSizeBytes": 16384,
+        "AppInsightsConnectionString": ""
     },
     "ManagedSettings": {
         "InfrastructureNetworkID": "",
