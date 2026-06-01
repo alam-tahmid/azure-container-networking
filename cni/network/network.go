@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"time"
 
@@ -640,11 +641,39 @@ func (plugin *NetPlugin) Add(args *cniSkel.CmdArgs) error {
 		}
 	}()
 
+	// Sort epInfos so InfraNIC is processed first. In stateless mode, ExternalInterfaces is empty
+	// on every ADD, so whichever NIC is processed first determines which interface the network
+	// gets bound to. If DelegatedVMNIC wins the race, the network gets created with eth1 as extIf.
+	// SecondaryEndpointClient then moves eth1 into the pod namespace, and the subsequent InfraNIC
+	// iteration finds the network bound to that now-gone interface, causing
+	// TransparentEndpointClient.AddEndpoints to fail with "no such network interface".
+	sortInfraNICFirst(epInfos)
+
 	err = plugin.nm.EndpointCreate(cnsclient, epInfos)
 	if err != nil {
 		return errors.Wrap(err, "failed to create endpoint") // behavior can change if you don't assign to err prior to returning
 	}
 	return nil
+}
+
+// sortInfraNICFirst sorts endpoint infos so that InfraNIC (or legacy empty NICType)
+// entries come before all other NIC types, preserving relative order among equals.
+func sortInfraNICFirst(epInfos []*network.EndpointInfo) {
+	slices.SortStableFunc(epInfos, func(a, b *network.EndpointInfo) int {
+		if isInfraOrLegacyNICType(a.NICType) && !isInfraOrLegacyNICType(b.NICType) {
+			return -1
+		}
+		if !isInfraOrLegacyNICType(a.NICType) && isInfraOrLegacyNICType(b.NICType) {
+			return 1
+		}
+		return 0
+	})
+}
+
+// isInfraOrLegacyNICType returns true if the NIC type is InfraNIC or empty (legacy).
+// Empty NICType is treated as infra for backward compatibility with older CNS responses.
+func isInfraOrLegacyNICType(nicType cns.NICType) bool {
+	return nicType == cns.InfraNIC || nicType == ""
 }
 
 func (plugin *NetPlugin) findMasterInterface(opt *createEpInfoOpt) string {
@@ -1164,8 +1193,7 @@ func (plugin *NetPlugin) Delete(args *cniSkel.CmdArgs) error {
 			zap.String("endpointID", epInfo.EndpointID))
 		telemetryClient.SendEvent("Deleting endpoint: " + epInfo.EndpointID)
 
-		isInfraOrLegacyNIC := epInfo.NICType == cns.InfraNIC || epInfo.NICType == ""
-		if !nwCfg.MultiTenancy && isInfraOrLegacyNIC {
+		if !nwCfg.MultiTenancy && isInfraOrLegacyNICType(epInfo.NICType) {
 			// Call into IPAM plugin to release the endpoint's addresses.
 			for i := range epInfo.IPAddresses {
 				logger.Info("Release ip", zap.String("ip", epInfo.IPAddresses[i].IP.String()))

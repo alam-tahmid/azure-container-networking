@@ -792,3 +792,43 @@ func (m *mockInterfaceGetter) GetNetworkInterfaces() ([]net.Interface, error) {
 func (m *mockInterfaceGetter) GetNetworkInterfaceAddrs(_ *net.Interface) ([]net.Addr, error) {
 	return nil, errNotImplemented
 }
+
+func TestSortInfraNICFirst(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     []cns.NICType
+		wantFirst cns.NICType
+	}{
+		{
+			name:      "infra already first",
+			input:     []cns.NICType{cns.InfraNIC, cns.NodeNetworkInterfaceFrontendNIC, cns.NodeNetworkInterfaceFrontendNIC},
+			wantFirst: cns.InfraNIC,
+		},
+		{
+			name:      "infra last among several frontends",
+			input:     []cns.NICType{cns.NodeNetworkInterfaceFrontendNIC, cns.NodeNetworkInterfaceFrontendNIC, cns.NodeNetworkInterfaceFrontendNIC, cns.InfraNIC},
+			wantFirst: cns.InfraNIC,
+		},
+		{
+			name:      "infra in the middle",
+			input:     []cns.NICType{cns.DelegatedVMNIC, cns.InfraNIC, cns.NodeNetworkInterfaceFrontendNIC},
+			wantFirst: cns.InfraNIC,
+		},
+		{
+			name:      "empty NICType treated as infra",
+			input:     []cns.NICType{cns.NodeNetworkInterfaceFrontendNIC, ""},
+			wantFirst: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			epInfos := make([]*network.EndpointInfo, len(tt.input))
+			for i, nic := range tt.input {
+				epInfos[i] = &network.EndpointInfo{NICType: nic}
+			}
+			sortInfraNICFirst(epInfos)
+			assert.Equal(t, tt.wantFirst, epInfos[0].NICType, "infra/legacy NIC should be sorted first")
+		})
+	}
+}
