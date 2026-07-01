@@ -18,6 +18,8 @@ import (
 	"github.com/Azure/azure-container-networking/network/hnswrapper"
 	"github.com/Azure/azure-container-networking/platform"
 	"github.com/Microsoft/hcsshim/hcn"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -575,6 +577,80 @@ func TestConfigureHCNNetworkInfraNIC(t *testing.T) {
 	if hostComputeNetwork.Type != expectedHcnNetworkType {
 		t.Fatalf("Host network mode is not configured as %v mode when interface NIC type is infraNIC", expectedHcnNetworkType)
 	}
+}
+
+func TestConfigureHCNNetworkUsesPrimaryInterfaceIdentifierFallback(t *testing.T) {
+	nm := &networkManager{
+		ExternalInterfaces: map[string]*externalInterface{},
+	}
+
+	extIf := externalInterface{
+		Name: "vEthernet (eth0)",
+	}
+
+	nwInfo := &EndpointInfo{
+		NetworkID:          "d3e97a83-ba4c-45d5-ba88-dc56757ece28",
+		MasterIfName:       "eth0",
+		NICType:            cns.InfraNIC,
+		PrimaryInterfaceIP: "10.240.0.4/24",
+		EnableMultiTenancy: true,
+	}
+
+	hostComputeNetwork, err := nm.configureHcnNetwork(nwInfo, &extIf)
+	require.NoError(t, err)
+	assert.NotNil(t, hostComputeNetwork)
+	assert.Len(t, hostComputeNetwork.Policies, 1)
+	assert.Equal(t, hcn.ProviderAddress, hostComputeNetwork.Policies[0].Type)
+	assert.Contains(t, string(hostComputeNetwork.Policies[0].Settings), "10.240.0.4")
+}
+
+func TestConfigureHCNNetworkUsesPrimaryInterfaceIdentifierFallbackWithSingleIPv4(t *testing.T) {
+	nm := &networkManager{
+		ExternalInterfaces: map[string]*externalInterface{},
+	}
+
+	extIf := externalInterface{
+		Name: "vEthernet (eth0)",
+	}
+
+	nwInfo := &EndpointInfo{
+		NetworkID:          "d3e97a83-ba4c-45d5-ba88-dc56757ece28",
+		MasterIfName:       "eth0",
+		NICType:            cns.InfraNIC,
+		PrimaryInterfaceIP: "10.240.0.4",
+		EnableMultiTenancy: true,
+	}
+
+	hostComputeNetwork, err := nm.configureHcnNetwork(nwInfo, &extIf)
+	require.NoError(t, err)
+	assert.NotNil(t, hostComputeNetwork)
+	assert.Len(t, hostComputeNetwork.Policies, 1)
+	assert.Equal(t, hcn.ProviderAddress, hostComputeNetwork.Policies[0].Type)
+	assert.Contains(t, string(hostComputeNetwork.Policies[0].Settings), "10.240.0.4")
+}
+
+func TestConfigureHCNNetworkDoesNotUsePrimaryInterfaceIdentifierForEthernet(t *testing.T) {
+	nm := &networkManager{
+		ExternalInterfaces: map[string]*externalInterface{},
+	}
+
+	extIf := externalInterface{
+		Name: "Ethernet",
+	}
+
+	nwInfo := &EndpointInfo{
+		NetworkID:          "d3e97a83-ba4c-45d5-ba88-dc56757ece28",
+		MasterIfName:       "Ethernet",
+		NICType:            cns.InfraNIC,
+		PrimaryInterfaceIP: "10.240.0.4/24",
+	}
+
+	hostComputeNetwork, err := nm.configureHcnNetwork(nwInfo, &extIf)
+	require.NoError(t, err)
+	assert.NotNil(t, hostComputeNetwork)
+	assert.Len(t, hostComputeNetwork.Policies, 1)
+	assert.Equal(t, hcn.NetAdapterName, hostComputeNetwork.Policies[0].Type)
+	assert.NotEqual(t, hcn.ProviderAddress, hostComputeNetwork.Policies[0].Type)
 }
 
 // Test Configure HCN Network for Swiftv2 DelegatedNIC HostComputeNetwork fields
