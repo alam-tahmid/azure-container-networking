@@ -3,6 +3,7 @@ package telemetry
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/Azure/azure-container-networking/aitelemetry"
 	"github.com/Azure/azure-container-networking/log"
@@ -10,6 +11,7 @@ import (
 
 var (
 	aiMetadata           string
+	connectionString     string
 	th                   aitelemetry.TelemetryHandle
 	gDisableTrace        bool
 	gDisableMetric       bool
@@ -33,9 +35,17 @@ func (tb *TelemetryBuffer) CreateAITelemetryHandle(aiConfig aitelemetry.AIConfig
 		return ErrTelemetryDisabled
 	}
 
-	th, err = aitelemetry.NewAITelemetry("", aiMetadata, aiConfig)
-	if err != nil {
-		return err
+	// Use the connection string if configured. Fall back to the instrumentation key otherwise.
+	if connectionString != "" {
+		th, err = aitelemetry.NewWithConnectionString(connectionString, aiConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create telemetry handle with connection string: %w", err)
+		}
+	} else {
+		th, err = aitelemetry.NewAITelemetry("", aiMetadata, aiConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create telemetry handle: %w", err)
+		}
 	}
 
 	gDisableMetric = disableMetric
@@ -95,4 +105,14 @@ func GetAIMetadata() string {
 // SetAIMetadata sets the aiMetadata value (for runtime configuration)
 func SetAIMetadata(metadata string) {
 	aiMetadata = metadata
+}
+
+// GetAIConnectionString returns the current AI connection string value
+func GetAIConnectionString() string {
+	return connectionString
+}
+
+// SetAIConnectionString sets the AI connection string value (for runtime configuration)
+func SetAIConnectionString(connStr string) {
+	connectionString = connStr
 }

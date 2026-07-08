@@ -105,6 +105,11 @@ func (s *TelemetrySidecar) startTelemetryService(ctx context.Context, config tel
 		}
 	}
 
+	// Set AI connection string from config if provided
+	if connStr := cnsConfig.TelemetrySettings.AppInsightsConnectionString; connStr != "" {
+		telemetry.SetAIConnectionString(connStr)
+	}
+
 	// Clean up any orphan socket
 	err := telemetry.NewTelemetryBuffer(s.logger).Cleanup(telemetry.FdName)
 	if err != nil {
@@ -142,7 +147,7 @@ func (s *TelemetrySidecar) startTelemetryService(ctx context.Context, config tel
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	if telemetry.GetAIMetadata() != "" {
+	if telemetry.GetAIMetadata() != "" || telemetry.GetAIConnectionString() != "" {
 		aiConfig := aitelemetry.AIConfig{
 			AppName:                      pluginName,
 			AppVersion:                   s.version,
@@ -159,8 +164,7 @@ func (s *TelemetrySidecar) startTelemetryService(ctx context.Context, config tel
 		}
 	}
 
-	s.logger.Info("Telemetry service started",
-		zap.Bool("appInsightsEnabled", telemetry.GetAIMetadata() != ""))
+	s.logger.Info("Telemetry service started", zap.Bool("appInsightsEnabled", telemetry.GetAIMetadata() != "" || telemetry.GetAIConnectionString() != ""))
 
 	go s.telemetryBuffer.PushData(ctx)
 	return nil

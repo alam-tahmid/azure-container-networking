@@ -71,6 +71,19 @@ func (c *logger) InitAIWithIKey(aiConfig ai.AIConfig, instrumentationKey string,
 	c.disableEventLogging = disableEventLogging
 }
 
+func (c *logger) InitAIWithConnectionString(aiConfig ai.AIConfig, connectionString string, disableTraceLogging, disableMetricLogging, disableEventLogging bool) {
+	th, err := ai.NewWithConnectionString(connectionString, aiConfig)
+	if err != nil {
+		c.logger.Errorf("Error initializing AI Telemetry with connection string:%v", err)
+		return
+	}
+	c.th = th
+	c.logger.Printf("AI Telemetry Handle created with connection string")
+	c.disableMetricLogging = disableMetricLogging
+	c.disableTraceLogging = disableTraceLogging
+	c.disableEventLogging = disableEventLogging
+}
+
 func (c *logger) Close() {
 	c.logger.Close()
 	if c.th != nil {
@@ -94,8 +107,11 @@ func (c *logger) SetAPIServer(apiserver string) {
 
 func (c *logger) Printf(format string, args ...any) {
 	c.logger.Logf(format, args...)
+	if c.disableTraceLogging {
+		return
+	}
 	c.zapLogger.Info(fmt.Sprintf(format, args...))
-	if c.th == nil || c.disableTraceLogging {
+	if c.th == nil {
 		return
 	}
 	msg := fmt.Sprintf(format, args...)
@@ -104,8 +120,11 @@ func (c *logger) Printf(format string, args ...any) {
 
 func (c *logger) Debugf(format string, args ...any) {
 	c.logger.Debugf(format, args...)
+	if c.disableTraceLogging {
+		return
+	}
 	c.zapLogger.Debug(fmt.Sprintf(format, args...))
-	if c.th == nil || c.disableTraceLogging {
+	if c.th == nil {
 		return
 	}
 	msg := fmt.Sprintf(format, args...)
@@ -114,8 +133,11 @@ func (c *logger) Debugf(format string, args ...any) {
 
 func (c *logger) Warnf(format string, args ...any) {
 	c.logger.Warnf(format, args...)
+	if c.disableTraceLogging {
+		return
+	}
 	c.zapLogger.Warn(fmt.Sprintf(format, args...))
-	if c.th == nil || c.disableTraceLogging {
+	if c.th == nil {
 		return
 	}
 	msg := fmt.Sprintf(format, args...)
@@ -124,8 +146,11 @@ func (c *logger) Warnf(format string, args ...any) {
 
 func (c *logger) Errorf(format string, args ...any) {
 	c.logger.Errorf(format, args...)
+	if c.disableTraceLogging {
+		return
+	}
 	c.zapLogger.Error(fmt.Sprintf(format, args...))
-	if c.th == nil || c.disableTraceLogging {
+	if c.th == nil {
 		return
 	}
 	msg := fmt.Sprintf(format, args...)
@@ -200,7 +225,11 @@ func (c *logger) sendTraceInternal(msg string, lvl ai.Level) {
 }
 
 func (c *logger) LogEvent(event ai.Event) {
-	if c.th == nil || c.disableEventLogging {
+	if c.disableEventLogging {
+		return
+	}
+	c.zapLogger.Info(event.EventName, zap.String("resource_id", event.ResourceID), zap.Any("properties", event.Properties))
+	if c.th == nil {
 		return
 	}
 	c.m.RLock()

@@ -120,11 +120,12 @@ const (
 type cniConflistScenario string
 
 const (
-	scenarioV4Overlay        cniConflistScenario = "v4overlay"
-	scenarioDualStackOverlay cniConflistScenario = "dualStackOverlay"
-	scenarioOverlay          cniConflistScenario = "overlay"
-	scenarioCilium           cniConflistScenario = "cilium"
-	scenarioSWIFT            cniConflistScenario = "swift"
+	scenarioV4Overlay             cniConflistScenario = "v4overlay"
+	scenarioDualStackOverlay      cniConflistScenario = "dualStackOverlay"
+	scenarioOverlay               cniConflistScenario = "overlay"
+	scenarioCilium                cniConflistScenario = "cilium"
+	scenarioSWIFT                 cniConflistScenario = "swift"
+	scenarioAzurecniChainedCilium cniConflistScenario = "azurecni-chained-cilium"
 )
 
 var (
@@ -579,9 +580,14 @@ func main() {
 			DebugMode:                    ts.DebugMode,
 		}
 
-		if aiKey := cnsconfig.TelemetrySettings.AppInsightsInstrumentationKey; aiKey != "" {
-			logger.InitAIWithIKey(aiConfig, aiKey, ts.DisableTrace, ts.DisableMetric, ts.DisableEvent)
-		} else {
+		switch selectAIMode(ts) {
+		case aiConnectionString:
+			//nolint:staticcheck // SA1019 ignore deprecated global logger
+			logger.InitAIWithConnectionString(aiConfig, ts.AppInsightsConnectionString, ts.DisableTrace, ts.DisableMetric, ts.DisableEvent)
+		case aiInstrumentationKey:
+			//nolint:staticcheck // SA1019 ignore deprecated global logger
+			logger.InitAIWithIKey(aiConfig, ts.AppInsightsInstrumentationKey, ts.DisableTrace, ts.DisableMetric, ts.DisableEvent)
+		case aiDefault:
 			logger.InitAI(aiConfig, ts.DisableTrace, ts.DisableMetric, ts.DisableEvent)
 		}
 
@@ -622,6 +628,8 @@ func main() {
 			conflistGenerator = &cniconflist.CiliumGenerator{Writer: writer}
 		case scenarioSWIFT:
 			conflistGenerator = &cniconflist.SWIFTGenerator{Writer: writer}
+		case scenarioAzurecniChainedCilium:
+			conflistGenerator = &cniconflist.AzureCNIChainedCiliumGenerator{Writer: writer}
 		default:
 			logger.Errorf("unable to generate cni conflist for unknown scenario: %s", scenario)
 			os.Exit(1)
@@ -632,9 +640,22 @@ func main() {
 	// If this errors, we will not have metadata in the AI logs. Should we exit?
 	metadata, _ := acn.GetHostMetadata(aitelemetry.MetadataFile)
 	aifields := loggerv2.MetadataToFields(metadata)
+	host, _ := os.Hostname()
+	hostMetadataFields := []zap.Field{
+		zap.String("hostname", host),
+		zap.String("version", version),
+		zap.String("kubernetes_apiserver", os.Getenv("KUBERNETES_SERVICE_HOST")),
+	}
+
+	// Attach IMDS metadata and logger-level fields to the v1 logger's ETW output.
+	allFields := append([]zap.Field{}, aifields...)
+	allFields = append(allFields, hostMetadataFields...)
+	logger.SetZapFields(allFields...) //nolint:staticcheck // ignore new deprecation
+
 	if cnsconfig.Logger.AppInsights != nil {
 		cnsconfig.Logger.AppInsights.Fields = append(cnsconfig.Logger.AppInsights.Fields, aifields...)
 	}
+	cnsconfig.Logger.AppendETWFields(allFields)
 
 	// build the zap logger
 	z, c, err := loggerv2.New(&cnsconfig.Logger)
@@ -643,8 +664,7 @@ func main() {
 		fmt.Printf("failed to create logger: %v", err)
 		os.Exit(1)
 	}
-	host, _ := os.Hostname()
-	z = z.With(zap.String("hostname", host), zap.String("version", version), zap.String("kubernetes_apiserver", os.Getenv("KUBERNETES_SERVICE_HOST")))
+	z = z.With(hostMetadataFields...)
 	config.Logger = z.With(zap.String("module", "cns service"))
 	// Set the v2 logger to the global logger if v2 logger enabled.
 	if cnsconfig.EnableLoggerV2 {
@@ -785,6 +805,7 @@ func main() {
 	httpRemoteRestService.SetOption(acn.OptHttpResponseHeaderTimeout, httpResponseHeaderTimeout)
 	httpRemoteRestService.SetOption(acn.OptProgramSNATIPTables, cnsconfig.ProgramSNATIPTables)
 	httpRemoteRestService.SetOption(acn.OptManageEndpointState, cnsconfig.ManageEndpointState)
+	httpRemoteRestService.SetOption(acn.OptEnableStaleHNSCleanupOnNCCreate, cnsconfig.EnableStaleHNSCleanupOnNCCreate)
 
 	// Create default ext network if commandline option is set
 	if len(strings.TrimSpace(createDefaultExtNetworkType)) > 0 {

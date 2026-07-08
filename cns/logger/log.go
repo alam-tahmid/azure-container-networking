@@ -4,12 +4,14 @@ package logger
 import (
 	"github.com/Azure/azure-container-networking/aitelemetry"
 	"github.com/Azure/azure-container-networking/cns/types"
+	"go.uber.org/zap"
 )
 
 type loggershim interface {
 	Close()
 	InitAI(aitelemetry.AIConfig, bool, bool, bool)
 	InitAIWithIKey(aitelemetry.AIConfig, string, bool, bool, bool)
+	InitAIWithConnectionString(aitelemetry.AIConfig, string, bool, bool, bool)
 	SetContextDetails(string, string)
 	SetAPIServer(string)
 	Printf(string, ...any)
@@ -30,6 +32,13 @@ var (
 )
 
 // Deprecated: The global logger is deprecated. Migrate to zap using the cns/logger/v2 package and pass the logger instead.
+func SetZapFields(fields ...zap.Field) {
+	if l, ok := Log.(*logger); ok {
+		l.zapLogger = l.zapLogger.With(fields...)
+	}
+}
+
+// Deprecated: The global logger is deprecated. Migrate to zap using the cns/logger/v2 package and pass the logger instead.
 func Close() {
 	Log.Close()
 }
@@ -47,6 +56,11 @@ func InitAI(aiConfig aitelemetry.AIConfig, disableTraceLogging, disableMetricLog
 // Deprecated: The global logger is deprecated. Migrate to zap using the cns/logger/v2 package and pass the logger instead.
 func InitAIWithIKey(aiConfig aitelemetry.AIConfig, instrumentationKey string, disableTraceLogging, disableMetricLogging, disableEventLogging bool) {
 	Log.InitAIWithIKey(aiConfig, instrumentationKey, disableTraceLogging, disableMetricLogging, disableEventLogging)
+}
+
+// Deprecated: The global logger is deprecated. Migrate to zap using the cns/logger/v2 package and pass the logger instead.
+func InitAIWithConnectionString(aiConfig aitelemetry.AIConfig, connectionString string, disableTraceLogging, disableMetricLogging, disableEventLogging bool) {
+	Log.InitAIWithConnectionString(aiConfig, connectionString, disableTraceLogging, disableMetricLogging, disableEventLogging)
 }
 
 // Deprecated: The global logger is deprecated. Migrate to zap using the cns/logger/v2 package and pass the logger instead.

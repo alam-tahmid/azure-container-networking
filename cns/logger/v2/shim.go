@@ -51,13 +51,17 @@ func (*shim) InitAI(aitelemetry.AIConfig, bool, bool, bool) {}
 
 func (*shim) InitAIWithIKey(aitelemetry.AIConfig, string, bool, bool, bool) {}
 
+func (*shim) InitAIWithConnectionString(aitelemetry.AIConfig, string, bool, bool, bool) {}
+
 func (s *shim) SetContextDetails(string, string) {}
 
 func (s *shim) SetAPIServer(string) {}
 
 func (s *shim) SendMetric(aitelemetry.Metric) {}
 
-func (s *shim) LogEvent(aitelemetry.Event) {}
+func (s *shim) LogEvent(event aitelemetry.Event) {
+	s.z.Sugar().Infow(event.EventName, "resource_id", event.ResourceID, "properties", event.Properties)
+}
 
 func AsV1(z *zap.Logger, closer func()) *shim { //nolint:revive // I want it to be annoying to use.
 	return &shim{z: z, closer: closer}

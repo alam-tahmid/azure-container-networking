@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"time"
 
@@ -62,13 +63,34 @@ const (
 )
 
 const (
-	// URL to query NMAgent version and determine whether we snat on host
-	nmAgentSupportedApisURL = "http://168.63.129.16/machine/plugins/?comp=nmagent&type=GetSupportedApis"
 	// Only SNAT support (no DNS support)
 	nmAgentSnatSupportAPI = "NetworkManagementSnatSupport"
 	// SNAT and DNS are both supported
 	nmAgentSnatAndDnsSupportAPI = "NetworkManagementDNSSupport"
 )
+
+// Wire Server addresses per environment.
+const (
+	// defaultWireServerAddress is the well-known Azure Wire Server IP used in production.
+	defaultWireServerAddress = "168.63.129.16"
+	// testWireServerAddress is the Wire Server endpoint used in test setups.
+	testWireServerAddress = "127.0.0.1:11281"
+)
+
+// Recognized values for cni.NetworkConfig.Env.
+const (
+	envTest = "test"
+)
+
+// wireServerAddressForEnv returns the Wire Server address to use for the given
+// environment value from the conflist ("env" field). Anything other than the
+// recognized test environment falls back to the production default.
+func wireServerAddressForEnv(env string) string {
+	if env == envTest {
+		return testWireServerAddress
+	}
+	return defaultWireServerAddress
+}
 
 // temporary consts related func determineSnat() which is to be deleted after
 // a baking period with newest NMAgent changes
@@ -208,7 +230,10 @@ func (plugin *NetPlugin) Stop() {
 	logger.Info("Plugin stopped")
 }
 
-// findInterfaceByMAC returns the name of the master interface
+// findInterfaceByMAC returns the name of the master interface matching the given MAC.
+// With accelerated networking, both the netvsc upper device (e.g. eth1) and the VF
+// (e.g. enP12217s2) share the same MAC. When the matched interface is a VF, this
+// function resolves and returns its master.
 func (plugin *NetPlugin) findInterfaceByMAC(macAddress string) string {
 	interfaces, err := plugin.netClient.GetNetworkInterfaces()
 	if err != nil {
@@ -217,14 +242,26 @@ func (plugin *NetPlugin) findInterfaceByMAC(macAddress string) string {
 	}
 	macs := make([]string, 0, len(interfaces))
 	for _, iface := range interfaces {
-		// find master interface by macAddress for Swiftv2
-		macs = append(macs, iface.HardwareAddr.String())
-		if iface.HardwareAddr.String() == macAddress {
-			return iface.Name
+		mac := iface.HardwareAddr.String()
+		macs = append(macs, mac)
+		if mac != macAddress {
+			continue
 		}
+		ifName, err := resolveMasterInterface(iface.Name)
+		if err != nil {
+			logger.Error("failed to resolve master interface",
+				zap.String("name", iface.Name),
+				zap.String("mac", macAddress),
+				zap.Error(err))
+			return ""
+		}
+		logger.Info("found master interface by MAC",
+			zap.String("resolved-master", ifName),
+			zap.String("interface", iface.Name),
+			zap.String("mac", macAddress))
+		return ifName
 	}
-	// Failed to find a suitable interface.
-	logger.Error("Failed to find interface by MAC", zap.String("macAddress", macAddress), zap.Strings("interfaces", macs))
+	logger.Error("failed to find interface by MAC", zap.String("macAddress", macAddress), zap.Strings("macs", macs))
 	return ""
 }
 
@@ -344,6 +381,10 @@ func (plugin *NetPlugin) getNetworkInfo(netNs string, interfaceInfo *network.Int
 	return nwInfo
 }
 
+func buildNmAgentSupportedApisURL(wireServerAddress string) string {
+	return fmt.Sprintf("http://%s/machine/plugins/?comp=nmagent&type=GetSupportedApis", wireServerAddress)
+}
+
 // CNI implementation
 // https://github.com/containernetworking/cni/blob/master/SPEC.md
 
@@ -438,7 +479,7 @@ func (plugin *NetPlugin) Add(args *cniSkel.CmdArgs) error {
 			zap.Any("IPs", cniResult.IPs),
 			zap.Error(log.NewErrorWithoutStackTrace(err)))
 
-		telemetryClient.SendEvent(fmt.Sprintf("ADD command completed with [ipamAddResult]: %s [epInfos]: %s [error]: %v ", ipamAddResult.PrettyString(), network.FormatSliceOfPointersToString(epInfos), err))
+		telemetryClient.SendEvent(fmt.Sprintf("ADD command completed with [error]: %v [ipamAddResult]: %s [epInfos]: %s ", err, ipamAddResult.PrettyString(), network.FormatSliceOfPointersToString(epInfos)))
 
 		operationTimeMs := time.Since(startTime).Milliseconds()
 		telemetryClient.SendMetric(telemetry.CNIAddTimeMetricStr, float64(operationTimeMs), make(map[string]string))
@@ -499,6 +540,8 @@ func (plugin *NetPlugin) Add(args *cniSkel.CmdArgs) error {
 		// multitenancy (swift v1) -> one interface info
 		telemetryClient.Settings().Context = "AzureCNIMultitenancy"
 		plugin.multitenancyClient.Init(cnsClient, AzureNetIOShim{})
+
+		nmAgentSupportedApisURL := buildNmAgentSupportedApisURL(wireServerAddressForEnv(nwCfg.Env))
 
 		// Temporary if block to determining whether we disable SNAT on host (for multi-tenant scenario only)
 		if enableSnatForDNS, nwCfg.EnableSnatOnHost, err = plugin.multitenancyClient.DetermineSnatFeatureOnHost(
@@ -625,12 +668,35 @@ func (plugin *NetPlugin) Add(args *cniSkel.CmdArgs) error {
 		}
 	}()
 
+	// Sort epInfos so InfraNIC is processed first. In stateless mode, ExternalInterfaces is empty
+	// on every ADD, so whichever NIC is processed first determines which interface the network
+	// gets bound to. If DelegatedVMNIC wins the race, the network gets created with eth1 as extIf.
+	// SecondaryEndpointClient then moves eth1 into the pod namespace, and the subsequent InfraNIC
+	// iteration finds the network bound to that now-gone interface, causing
+	// TransparentEndpointClient.AddEndpoints to fail with "no such network interface".
+	sortInfraNICFirst(epInfos)
+
 	err = plugin.nm.EndpointCreate(cnsclient, epInfos)
 	if err != nil {
 		return errors.Wrap(err, "failed to create endpoint") // behavior can change if you don't assign to err prior to returning
 	}
 	return nil
 }
+
+// sortInfraNICFirst sorts endpoint infos so that InfraNIC (or legacy empty NICType)
+// entries come before all other NIC types, preserving relative order among equals.
+func sortInfraNICFirst(epInfos []*network.EndpointInfo) {
+	slices.SortStableFunc(epInfos, func(a, b *network.EndpointInfo) int {
+		if a.NICType.IsInfraOrLegacy() && !b.NICType.IsInfraOrLegacy() {
+			return -1
+		}
+		if !a.NICType.IsInfraOrLegacy() && b.NICType.IsInfraOrLegacy() {
+			return 1
+		}
+		return 0
+	})
+}
+
 
 func (plugin *NetPlugin) findMasterInterface(opt *createEpInfoOpt) string {
 	switch opt.ifInfo.NICType {
@@ -721,6 +787,15 @@ func (plugin *NetPlugin) createEpInfo(opt *createEpInfoOpt) (*network.EndpointIn
 		endpointID = plugin.nm.GetEndpointIDByNicType(opt.args.ContainerID, ifName, opt.ifInfo.NICType)
 	}
 
+	// Only copy options (RoutesKey, IPTablesKey, SNATIPKey) for InfraNIC or legacy (empty NICType).
+	// These options are infra-only host-namespace constructs set by setHostOptions and are not
+	// applicable to delegated/secondary NICs on either Linux or Windows.
+	// For non-infra NICs, options remains nil so handleCommonOptions becomes a no-op.
+	var options map[string]interface{}
+	if opt.ifInfo.NICType == cns.InfraNIC || opt.ifInfo.NICType == "" {
+		options = opt.ipamAddConfig.shallowCopyIpamAddConfigOptions()
+	}
+
 	endpointInfo := network.EndpointInfo{
 		NetworkID:                     opt.networkID,
 		Mode:                          opt.ipamAddConfig.nwCfg.Mode,
@@ -729,7 +804,7 @@ func (plugin *NetPlugin) createEpInfo(opt *createEpInfoOpt) (*network.EndpointIn
 		BridgeName:                    opt.ipamAddConfig.nwCfg.Bridge,
 		NetworkPolicies:               networkPolicies, // nw and ep policies separated to avoid possible conflicts
 		NetNs:                         opt.ipamAddConfig.args.Netns,
-		Options:                       opt.ipamAddConfig.shallowCopyIpamAddConfigOptions(),
+		Options:                       options,
 		DisableHairpinOnHostInterface: opt.ipamAddConfig.nwCfg.DisableHairpinOnHostInterface,
 		IsIPv6Enabled:                 opt.ipv6Enabled, // present infra only
 
@@ -764,6 +839,9 @@ func (plugin *NetPlugin) createEpInfo(opt *createEpInfoOpt) (*network.EndpointIn
 		NetworkContainerID:       opt.ifInfo.NetworkContainerID,
 		AllowInboundFromHostToNC: opt.ifInfo.AllowHostToNCCommunication,
 		AllowInboundFromNCToHost: opt.ifInfo.AllowNCToHostCommunication,
+	}
+	if opt.ifInfo.NCResponse != nil {
+		endpointInfo.PrimaryInterfaceIP = opt.ifInfo.NCResponse.PrimaryInterfaceIdentifier
 	}
 
 	if err = addSubnetToEndpointInfo(*opt.ifInfo, &endpointInfo); err != nil {
@@ -982,7 +1060,7 @@ func (plugin *NetPlugin) Delete(args *cniSkel.CmdArgs) error {
 		logger.Info("DEL command completed",
 			zap.String("pod", k8sPodName),
 			zap.Error(log.NewErrorWithoutStackTrace(err)))
-		telemetryClient.SendEvent(fmt.Sprintf("DEL command completed: [podname]: %s [namespace]: %s [error]: %v", k8sPodName, k8sNamespace, err))
+		telemetryClient.SendEvent(fmt.Sprintf("DEL command completed: [error]: %v [podname]: %s [namespace]: %s", err, k8sPodName, k8sNamespace))
 		operationTimeMs := time.Since(startTime).Milliseconds()
 		telemetryClient.SendMetric(telemetry.CNIDelTimeMetricStr, float64(operationTimeMs), make(map[string]string))
 	}()
@@ -1126,12 +1204,21 @@ func (plugin *NetPlugin) Delete(args *cniSkel.CmdArgs) error {
 	logger.Info("Deleting the endpoints from the ipam")
 	// delete endpoint state in cns and in statefile
 	for _, epInfo := range epInfos {
+		// Skip known non-Infra NIC types: their IPs are not allocated by ipamInvoker.Add
+		// (they come from the host APIPA range or SwiftV2 static allocation), so the invoker
+		// has no record to release. Stateless CNI populates IPAddresses for every NIC type,
+		// so this guard is what stops Delete from leaking into ipamInvoker paths.
+		if epInfo.NICType == cns.DelegatedVMNIC ||
+			epInfo.NICType == cns.NodeNetworkInterfaceFrontendNIC ||
+			epInfo.NICType == cns.ApipaNIC {
+			continue
+		}
+
 		logger.Info("Deleting endpoint",
 			zap.String("endpointID", epInfo.EndpointID))
 		telemetryClient.SendEvent("Deleting endpoint: " + epInfo.EndpointID)
 
-		if !nwCfg.MultiTenancy && (epInfo.NICType == cns.InfraNIC || epInfo.NICType == "") {
-			// Delegated/secondary nic ips are statically allocated so we don't need to release
+		if !nwCfg.MultiTenancy && epInfo.NICType.IsInfraOrLegacy() {
 			// Call into IPAM plugin to release the endpoint's addresses.
 			for i := range epInfo.IPAddresses {
 				logger.Info("Release ip", zap.String("ip", epInfo.IPAddresses[i].IP.String()))

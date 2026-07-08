@@ -34,6 +34,7 @@ type TelemetryConfig struct {
 	BatchSizeInBytes              int
 	GetEnvRetryCount              int
 	GetEnvRetryWaitTimeInSecs     int
+	AIConnectionString            string `json:"AIConnectionString"`
 }
 
 // FdName - file descriptor name

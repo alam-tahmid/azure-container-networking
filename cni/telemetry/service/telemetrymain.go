@@ -167,6 +167,10 @@ func main() {
 		GetEnvRetryWaitTimeInSecs:    config.GetEnvRetryWaitTimeInSecs,
 	}
 
+	if config.AIConnectionString != "" {
+		telemetry.SetAIConnectionString(config.AIConnectionString)
+	}
+
 	if err := tb.CreateAITelemetryHandle(aiConfig, config.DisableAll, config.DisableTrace, config.DisableMetric); err != nil { // nolint
 		logger.Error("AI Handle creation error:", zap.Error(err))
 	}

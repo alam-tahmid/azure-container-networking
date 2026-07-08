@@ -23,46 +23,47 @@ const (
 )
 
 type CNSConfig struct {
-	AZRSettings                 AZRSettings
-	AsyncPodDeletePath          string
-	CNIConflistFilepath         string
-	CNIConflistScenario         string
-	ChannelMode                 string
-	EnableAPIServerHealthPing   bool
-	EnableAsyncPodDelete        bool
-	EnableCNIConflistGeneration bool
-	EnableIPAMv2                bool
-	EnableK8sDevicePlugin       bool
-	EnableLoggerV2              bool
-	EnablePprof                 bool
-	EnableStateMigration        bool
-	EnableSubnetScarcity        bool
-	EnableSwiftV1DualStack      bool
-	EnableSwiftV2               bool
-	IPv6PrefixClamp             int
-	InitializeFromCNI           bool
-	KeyVaultSettings            KeyVaultSettings
-	Logger                      loggerv2.Config
-	MSISettings                 MSISettings
-	ManageEndpointState         bool
-	ManagedSettings             ManagedSettings
-	MellanoxMonitorIntervalSecs int
-	MetricsBindAddress          string
-	ProgramSNATIPTables         bool
-	SyncHostNCTimeoutMs         int
-	SyncHostNCVersionIntervalMs int
-	TLSCertificatePath          string
-	TLSEndpoint                 string
-	TLSPort                     string
-	TLSSubjectName              string
-	TelemetrySettings           TelemetrySettings
-	UseHTTPS                    bool
-	UseMTLS                     bool
-	WatchPods                   bool `json:"-"`
-	WireserverIP                string
-	GRPCSettings                GRPCSettings
-	MinTLSVersion               string
-	MtlsClientCertSubjectName   string
+	AZRSettings                     AZRSettings
+	AsyncPodDeletePath              string
+	CNIConflistFilepath             string
+	CNIConflistScenario             string
+	ChannelMode                     string
+	EnableAPIServerHealthPing       bool
+	EnableAsyncPodDelete            bool
+	EnableCNIConflistGeneration     bool
+	EnableIPAMv2                    bool
+	EnableK8sDevicePlugin           bool
+	EnableLoggerV2                  bool
+	EnablePprof                     bool
+	EnableStateMigration            bool
+	EnableSubnetScarcity            bool
+	EnableStaleHNSCleanupOnNCCreate bool
+	EnableSwiftV1DualStack          bool
+	EnableSwiftV2                   bool
+	IPv6PrefixClamp                 int
+	InitializeFromCNI               bool
+	KeyVaultSettings                KeyVaultSettings
+	Logger                          loggerv2.Config
+	MSISettings                     MSISettings
+	ManageEndpointState             bool
+	ManagedSettings                 ManagedSettings
+	MellanoxMonitorIntervalSecs     int
+	MetricsBindAddress              string
+	ProgramSNATIPTables             bool
+	SyncHostNCTimeoutMs             int
+	SyncHostNCVersionIntervalMs     int
+	TLSCertificatePath              string
+	TLSEndpoint                     string
+	TLSPort                         string
+	TLSSubjectName                  string
+	TelemetrySettings               TelemetrySettings
+	UseHTTPS                        bool
+	UseMTLS                         bool
+	WatchPods                       bool `json:"-"`
+	WireserverIP                    string
+	GRPCSettings                    GRPCSettings
+	MinTLSVersion                   string
+	MtlsClientCertSubjectName       string
 }
 
 type TelemetrySettings struct {
@@ -90,8 +91,11 @@ type TelemetrySettings struct {
 	SnapshotIntervalInMins int
 	// Interval for sending config snapshot events.
 	ConfigSnapshotIntervalInMins int
-	// AppInsightsInstrumentationKey allows the user to override the default appinsights ikey
+	// AppInsightsInstrumentationKey allows the user to override the default appinsights ikey.
+	// Used only when AppInsightsConnectionString is empty.
 	AppInsightsInstrumentationKey string
+	// AppInsightsConnectionString is the connection string for the app insights resource.
+	AppInsightsConnectionString string
 }
 
 type ManagedSettings struct {
