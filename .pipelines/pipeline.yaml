@@ -26,6 +26,11 @@ schedules:
   branches:
     include: ["master"]
   always: true
+- cron: "0 */4 * * *" # Every 4 hours
+  displayName: "Scheduled Failure Analysis Agent Run"
+  branches:
+    include: ["master"]
+  always: true
 
 parameters:
   - name: buildCni
@@ -318,6 +323,18 @@ stages:
                 arch: $(arch)
                 name: $(name)
                 os: $(os)
+
+    - stage: build_failure_analysis
+      displayName: Build Failure Analysis
+      dependsOn:
+        - binaries
+        - containerize
+        - containerize_npm
+      condition: or(failed('binaries'), failed('containerize'), failed('containerize_npm'))
+      jobs:
+        - template: templates/pipeline-failure-analysis.job.yaml
+          parameters:
+            scope: build
 
     - stage: publish
       displayName: Publish Multiarch Manifests
