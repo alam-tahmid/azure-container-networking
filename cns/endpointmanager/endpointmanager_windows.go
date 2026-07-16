@@ -37,6 +37,14 @@ func (em *EndpointManager) deleteEndpoint(ctx context.Context, containerid strin
 		if err := hnsclient.DeleteHNSEndpointbyID(hnsEndpointID); err != nil {
 			return errors.Wrap(err, "failed to delete HNS endpoint with id "+ipInfo.HnsEndpointID)
 		}
+
+		// For SwiftV2 delegated NICs, each endpoint gets its own dedicated transparent HNS network.
+		// In order to properly clean up all the resources for this endpoint, we must also delete the network.
+		if ipInfo.HnsNetworkID != "" && ipInfo.NICType == cns.DelegatedVMNIC {
+			if err := hnsclient.DeleteNetworkByIDHnsV2(ipInfo.HnsNetworkID); err != nil {
+				return errors.Wrap(err, "failed to delete HNS network with id "+ipInfo.HnsNetworkID)
+			}
+		}
 	}
 	return nil
 }
